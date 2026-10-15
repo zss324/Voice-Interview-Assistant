@@ -1,0 +1,21 @@
+[project]
+name = "voice-interview-assistant"
+version = "1.1.0"
+description = "Windows 11 voice interview assistant with local speech recognition"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { text = "MIT" }
+dependencies = [
+    "PyQt6>=6.7.0",
+    "qasync>=0.27.1",
+    "openai>=1.40.0",
+    "python-dotenv>=1.0.1",
+    "PyMuPDF>=1.24.0",
+    "sherpa-onnx==1.13.8",
+    "PyAudioWPatch>=0.2.12 ; sys_platform == 'win32'",
+    "pywin32>=306 ; sys_platform == 'win32'",
+    "numpy>=1.26,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pyinstaller>=6.10"]
