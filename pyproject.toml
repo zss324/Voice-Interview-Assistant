@@ -1,6 +1,6 @@
 [project]
 name = "voice-interview-assistant"
-version = "1.1.0"
+version = "1.2.0"
 description = "Windows 11 voice interview assistant with local speech recognition"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

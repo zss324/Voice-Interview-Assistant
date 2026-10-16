@@ -2,7 +2,7 @@
   #error ModelDir must be supplied by build-installer.ps1
 #endif
 
-#define AppVersion "1.1.0"
+#define AppVersion "1.2.0"
 #define ModelName "sherpa-onnx-streaming-paraformer-bilingual-zh-en"
 
 [Setup]

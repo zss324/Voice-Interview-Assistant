@@ -25,3 +25,27 @@ def test_audio_mode_selects_playback_microphone_or_both(tmp_path, monkeypatch):
     window._set_taskbar_hidden(False)
     assert window.windowFlags() & Qt.WindowType.WindowType_Mask == Qt.WindowType.Window
     window.close()
+
+
+def test_session_opacity_and_temporary_hide_restore(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "app_dir", lambda: tmp_path)
+    monkeypatch.setattr(gui, "list_audio_sources", lambda: [])
+    monkeypatch.setattr(gui.MainWindow, "_exclude_from_capture", lambda self: None)
+    app = QApplication.instance() or QApplication([])
+    window = gui.MainWindow()
+    window.show()
+
+    window.session_opacity.setValue(55)
+    assert window.opacity.value() == 55
+    assert window.session_opacity_label.text() == "55%"
+    window.opacity.setValue(70)
+    assert window.session_opacity.value() == 70
+
+    window._hotkey_registered = True
+    window._temporarily_hide()
+    assert window.isHidden()
+    window._restore_window()
+    assert not window.isHidden()
+
+    window._hotkey_registered = False
+    window.close()

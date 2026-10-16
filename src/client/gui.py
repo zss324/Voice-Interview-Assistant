@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import ctypes
 import sys
+from time import monotonic
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -14,10 +17,13 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QMenu,
     QProgressBar,
     QPushButton,
     QSlider,
     QStackedWidget,
+    QStyle,
+    QSystemTrayIcon,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -46,6 +52,9 @@ class MainWindow(QMainWindow):
         self.answer_parts: list[str] = []
         self.capture_excluded = False
         self._taskbar_hidden = False
+        self._hotkey_registered = False
+        self._answer_started_at: float | None = None
+        self._answer_has_text = False
 
         self.setWindowTitle("语音面试助手 Voice Interview Assistant")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
@@ -55,6 +64,18 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_setup())
         self.stack.addWidget(self._build_session())
         self.setWindowOpacity(self.config.profile.opacity / 100)
+        self.answer_timer = QTimer(self)
+        self.answer_timer.timeout.connect(self._update_answer_wait)
+        self.tray = QSystemTrayIcon(
+            QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon), self
+        )
+        self.tray.setToolTip("语音面试助手：点击恢复窗口")
+        tray_menu = QMenu(self)
+        restore_action = QAction("显示助手", self)
+        restore_action.triggered.connect(self._restore_window)
+        tray_menu.addAction(restore_action)
+        self.tray.setContextMenu(tray_menu)
+        self.tray.activated.connect(self._tray_activated)
 
         self.speech_signals.ready.connect(self._speech_ready)
         self.speech_signals.partial.connect(self._speech_partial)
@@ -159,6 +180,19 @@ class MainWindow(QMainWindow):
         self.status = QLabel("等待语音问题…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        visibility = QHBoxLayout()
+        visibility.addWidget(QLabel("透明度"))
+        self.session_opacity = QSlider(Qt.Orientation.Horizontal)
+        self.session_opacity.setRange(35, 100)
+        self.session_opacity.setValue(self.config.profile.opacity)
+        self.session_opacity.valueChanged.connect(self._opacity_changed)
+        self.session_opacity_label = QLabel(f"{self.config.profile.opacity}%")
+        visibility.addWidget(self.session_opacity, 1)
+        visibility.addWidget(self.session_opacity_label)
+        hide_button = QPushButton("临时隐藏（Ctrl+Alt+H 恢复）")
+        hide_button.clicked.connect(self._temporarily_hide)
+        visibility.addWidget(hide_button)
+        layout.addLayout(visibility)
         self.audio_level = QProgressBar()
         self.audio_level.setRange(0, 100)
         self.audio_level.setFormat("输入音量 %p%")
@@ -177,12 +211,16 @@ class MainWindow(QMainWindow):
         self.pause_button.clicked.connect(self._toggle_pause)
         retry_button = QPushButton("重新回答")
         retry_button.clicked.connect(self._retry)
+        self.cancel_button = QPushButton("取消生成")
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self._cancel_answer)
         current_button = QPushButton("回答当前识别文字")
         current_button.clicked.connect(self._answer_current)
         stop_button = QPushButton("结束并返回准备页")
         stop_button.clicked.connect(self._stop)
         buttons.addWidget(self.pause_button)
         buttons.addWidget(retry_button)
+        buttons.addWidget(self.cancel_button)
         buttons.addWidget(current_button)
         buttons.addStretch()
         buttons.addWidget(stop_button)
@@ -229,8 +267,60 @@ class MainWindow(QMainWindow):
 
     def _opacity_changed(self, value: int) -> None:
         self.opacity_label.setText(f"{value}%")
+        self.session_opacity_label.setText(f"{value}%")
+        if self.opacity.value() != value:
+            self.opacity.setValue(value)
+        if self.session_opacity.value() != value:
+            self.session_opacity.setValue(value)
         self.setWindowOpacity(value / 100)
         QTimer.singleShot(0, self._exclude_from_capture)
+        if self.active:
+            self._save_profile()
+
+    def _register_restore_hotkey(self) -> None:
+        if sys.platform != "win32" or self._hotkey_registered:
+            return
+        self._hotkey_registered = bool(ctypes.windll.user32.RegisterHotKey(
+            int(self.winId()), 0x564941, 0x0002 | 0x0001 | 0x4000, ord("H")
+        ))
+
+    def _unregister_restore_hotkey(self) -> None:
+        if self._hotkey_registered and sys.platform == "win32":
+            ctypes.windll.user32.UnregisterHotKey(int(self.winId()), 0x564941)
+            self._hotkey_registered = False
+
+    def nativeEvent(self, event_type, message):
+        if sys.platform == "win32":
+            from ctypes import wintypes
+
+            event = wintypes.MSG.from_address(int(message))
+            if event.message == 0x0312 and event.wParam == 0x564941:
+                if self.isHidden():
+                    self._restore_window()
+                elif self.stack.currentIndex() == 1:
+                    self._temporarily_hide()
+                return True, 0
+        return super().nativeEvent(event_type, message)
+
+    def _temporarily_hide(self) -> None:
+        tray_available = QSystemTrayIcon.isSystemTrayAvailable()
+        if not self._hotkey_registered and not tray_available:
+            QMessageBox.warning(self, "无法隐藏", "全局快捷键和系统托盘均不可用，窗口无法安全恢复。")
+            return
+        if tray_available:
+            self.tray.show()
+        self.hide()
+
+    def _restore_window(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.tray.hide()
+        QTimer.singleShot(0, self._exclude_from_capture)
+
+    def _tray_activated(self, reason) -> None:
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self._restore_window()
 
     def _set_taskbar_hidden(self, hidden: bool) -> None:
         if self._taskbar_hidden == hidden:
@@ -297,6 +387,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
         self.status.setText("正在加载本地语音模型…")
         self._set_taskbar_hidden(self.hide_taskbar.isChecked())
+        self._register_restore_hotkey()
         QTimer.singleShot(0, self._exclude_from_capture)
 
     def _speech_ready(self, label: str) -> None:
@@ -346,6 +437,13 @@ class MainWindow(QMainWindow):
         if self.last_question and self.answer_enabled:
             self.service.answer(self.last_question, self.config.profile)
 
+    def _cancel_answer(self) -> None:
+        self.service.cancel()
+        self.answer_timer.stop()
+        self._answer_started_at = None
+        self.cancel_button.setEnabled(False)
+        self.status.setText("已取消生成；可点击“重新回答”重试。")
+
     def _answer_current(self) -> None:
         question = self.question_text.toPlainText().strip()
         if question:
@@ -359,6 +457,11 @@ class MainWindow(QMainWindow):
         self.active = False
         self.speech.stop()
         self.service.cancel()
+        self.answer_timer.stop()
+        self._answer_started_at = None
+        self.cancel_button.setEnabled(False)
+        self._unregister_restore_hotkey()
+        self.tray.hide()
         self.pause_button.setText("暂停监听")
         self.pause_button.setEnabled(True)
         self.stack.setCurrentIndex(0)
@@ -367,17 +470,38 @@ class MainWindow(QMainWindow):
     def _answer_started(self) -> None:
         self.answer_parts = []
         self.answer_text.clear()
-        self.status.setText("正在生成回答…")
+        self._answer_started_at = monotonic()
+        self._answer_has_text = False
+        self.cancel_button.setEnabled(True)
+        self.answer_timer.start(1000)
+        self._update_answer_wait()
+
+    def _update_answer_wait(self) -> None:
+        if self._answer_started_at is None:
+            return
+        elapsed = int(monotonic() - self._answer_started_at)
+        if self._answer_has_text:
+            self.status.setText(f"正在生成回答… 已等待 {elapsed} 秒")
+        else:
+            self.status.setText(f"正在等待回答首字… {elapsed} 秒（最多 15 秒）")
 
     def _answer_delta(self, delta: str) -> None:
+        self._answer_has_text = True
         self.answer_parts.append(delta)
         self.answer_text.setPlainText("".join(self.answer_parts))
+        self._update_answer_wait()
 
     def _answer_done(self, answer: str) -> None:
+        self.answer_timer.stop()
+        self._answer_started_at = None
+        self.cancel_button.setEnabled(False)
         self.answer_text.setPlainText(answer)
         self.status.setText("等待下一个问题…")
 
     def _answer_error(self, message: str) -> None:
+        self.answer_timer.stop()
+        self._answer_started_at = None
+        self.cancel_button.setEnabled(False)
         self.status.setText(message)
 
     def showEvent(self, event) -> None:
@@ -398,6 +522,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.active = False
+        self._unregister_restore_hotkey()
+        self.tray.hide()
+        self.answer_timer.stop()
         self._save_profile()
         try:
             self.config.save_api_key(self.api_key.text())

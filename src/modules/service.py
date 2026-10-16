@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 
 from openai import AsyncOpenAI
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -45,6 +46,10 @@ def build_messages(question: str, profile: Profile) -> list[dict[str, str]]:
 
 
 class AnswerService:
+    FIRST_TOKEN_TIMEOUT = 15.0
+    STREAM_IDLE_TIMEOUT = 10.0
+    TOTAL_TIMEOUT = 45.0
+
     def __init__(self, signals: AnswerSignals) -> None:
         self.signals = signals
         self._client: AsyncOpenAI | None = None
@@ -53,7 +58,7 @@ class AnswerService:
     def set_api_key(self, key: str) -> None:
         if self._client is not None:
             asyncio.create_task(self._client.close())
-        self._client = AsyncOpenAI(api_key=key, base_url=BASE_URL, timeout=45.0)
+        self._client = AsyncOpenAI(api_key=key, base_url=BASE_URL, timeout=15.0, max_retries=0)
 
     def answer(self, question: str, profile: Profile) -> None:
         self.cancel()
@@ -62,6 +67,7 @@ class AnswerService:
     def cancel(self) -> None:
         if self._task is not None and not self._task.done():
             self._task.cancel()
+        self._task = None
 
     async def _answer(self, question: str, profile: Profile) -> None:
         if self._client is None:
@@ -69,28 +75,64 @@ class AnswerService:
             return
         self.signals.started.emit()
         answer = ""
+        started_at = monotonic()
+        first_token_at: float | None = None
+        stream = None
         try:
-            stream = await self._client.chat.completions.create(
-                model=MODEL,
-                messages=build_messages(question, profile),  # type: ignore[arg-type]
-                stream=True,
-                max_tokens=450,
-                extra_body={"enable_thinking": False},
+            stream = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=MODEL,
+                    messages=build_messages(question, profile),  # type: ignore[arg-type]
+                    stream=True,
+                    max_tokens=450,
+                    extra_body={"enable_thinking": False},
+                ),
+                timeout=self.FIRST_TOKEN_TIMEOUT,
             )
-            try:
-                async for chunk in stream:
-                    if chunk.choices:
-                        delta = chunk.choices[0].delta.content or ""
-                        if delta:
-                            answer += delta
+            iterator = stream.__aiter__()
+            while True:
+                now = monotonic()
+                remaining_total = self.TOTAL_TIMEOUT - (now - started_at)
+                remaining_first = self.FIRST_TOKEN_TIMEOUT - (now - started_at)
+                if first_token_at is None:
+                    timeout = min(remaining_total, remaining_first)
+                else:
+                    timeout = min(remaining_total, self.STREAM_IDLE_TIMEOUT)
+                if timeout <= 0:
+                    raise asyncio.TimeoutError
+                try:
+                    chunk = await asyncio.wait_for(iterator.__anext__(), timeout=timeout)
+                except StopAsyncIteration:
+                    break
+                if chunk.choices:
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        if first_token_at is None and monotonic() - started_at > self.FIRST_TOKEN_TIMEOUT:
+                            raise asyncio.TimeoutError
+                        first_token_at = first_token_at or monotonic()
+                        answer += delta
+                        if self._task is asyncio.current_task():
                             self.signals.delta.emit(delta)
-            finally:
-                await stream.close()
-            self.signals.done.emit(answer)
+            if self._task is asyncio.current_task():
+                if answer:
+                    self.signals.done.emit(answer)
+                else:
+                    self.signals.error.emit("服务未返回回答文字，请点击“重新回答”重试。")
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError:
+            if self._task is asyncio.current_task():
+                reason = "等待首字超过 15 秒" if first_token_at is None else "回答输出中断或超过 45 秒"
+                self.signals.error.emit(f"{reason}，已停止生成；可点击“重新回答”重试。")
         except Exception as exc:
-            self.signals.error.emit(f"回答失败：{exc}")
+            if self._task is asyncio.current_task():
+                self.signals.error.emit(f"回答失败：{type(exc).__name__}；可点击“重新回答”重试。")
+        finally:
+            if stream is not None:
+                try:
+                    await asyncio.wait_for(stream.close(), timeout=2.0)
+                except (Exception, asyncio.CancelledError):
+                    pass
 
     async def close(self) -> None:
         if self._task is not None and not self._task.done():
