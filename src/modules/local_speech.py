@@ -6,7 +6,6 @@ import threading
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from time import monotonic
 
 import numpy as np
 import pyaudiowpatch as pyaudio
@@ -149,69 +148,12 @@ class SpeechSignals(QObject):
     error = pyqtSignal(str)
 
 
-class UtteranceBoundary:
-    """Detect a completed utterance when the model does not report an endpoint."""
-
-    QUIET_LEVEL = 18
-    QUIET_SECONDS = 1.4
-    MIN_TEXT_AGE = 0.8
-    NOISY_STABLE_SECONDS = 3.0
-    MAX_UTTERANCE_SECONDS = 12.0
-
-    def __init__(self) -> None:
-        self.reset()
-
-    def reset(self) -> None:
-        self.last_text = ""
-        self.last_significant_text = ""
-        self.last_change_at: float | None = None
-        self.last_loud_at: float | None = None
-        self.first_text_at: float | None = None
-        self.peak_level = 0
-
-    def observe(self, text: str, level: int, now: float, endpoint: bool) -> bool:
-        if text != self.last_text:
-            if not self.last_significant_text or self._significant_change(self.last_significant_text, text):
-                self.last_significant_text = text
-                self.last_change_at = now
-            self.last_text = text
-        if text and self.first_text_at is None:
-            self.first_text_at = now
-        self.peak_level = max(self.peak_level, level)
-        if level > max(self.QUIET_LEVEL, self.peak_level * 0.35):
-            self.last_loud_at = now
-        if not text:
-            return False
-        if endpoint:
-            return True
-        if self.last_change_at is None:
-            return False
-        stable_for = now - self.last_change_at
-        quiet_for = float("inf") if self.last_loud_at is None else now - self.last_loud_at
-        text_age = now - self.first_text_at if self.first_text_at is not None else 0.0
-        return (
-            quiet_for >= self.QUIET_SECONDS and text_age >= self.MIN_TEXT_AGE
-        ) or stable_for >= self.NOISY_STABLE_SECONDS or text_age >= self.MAX_UTTERANCE_SECONDS
-
-    @staticmethod
-    def _significant_change(previous: str, current: str) -> bool:
-        if abs(len(current) - len(previous)) >= 2:
-            return True
-        common = 0
-        for left, right in zip(previous, current):
-            if left != right:
-                break
-            common += 1
-        return common < min(len(previous), len(current)) - 2
-
-
 class LocalSpeechRecognizer:
     def __init__(self, signals: SpeechSignals) -> None:
         self.signals = signals
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._paused = threading.Event()
-        self._discard_current = threading.Event()
 
     def start(self, source: AudioSource | AudioSelection) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -223,7 +165,6 @@ class LocalSpeechRecognizer:
             raise FileNotFoundError(f"本地语音模型不完整：{directory}；缺少 {', '.join(missing)}")
         self._stop.clear()
         self._paused.clear()
-        self._discard_current.clear()
         self._thread = threading.Thread(target=self._run, args=(source, directory), daemon=True)
         self._thread.start()
 
@@ -232,10 +173,6 @@ class LocalSpeechRecognizer:
             self._paused.set()
         else:
             self._paused.clear()
-
-    def discard_current_utterance(self) -> None:
-        """Start a fresh recognition stream after a manually submitted question."""
-        self._discard_current.set()
 
     def stop(self) -> None:
         self._stop.set()
@@ -331,7 +268,6 @@ class LocalSpeechRecognizer:
             )
             stream = recognizer.create_stream()
             last_partial = ""
-            boundary = UtteranceBoundary()
             was_paused = False
             chunks = self._mixed_chunks(source) if isinstance(source, AudioSelection) else self._single_chunks(source)
             self.signals.ready.emit(source.label)
@@ -340,31 +276,24 @@ class LocalSpeechRecognizer:
                     if not was_paused:
                         recognizer.reset(stream)
                         last_partial = ""
-                        boundary.reset()
                         was_paused = True
                     self.signals.level.emit(0)
                     continue
                 was_paused = False
-                if self._discard_current.is_set():
-                    recognizer.reset(stream)
-                    last_partial = ""
-                    boundary.reset()
-                    self._discard_current.clear()
                 level = min(100, int(np.sqrt(np.mean(samples * samples)) * 1000))
                 self.signals.level.emit(level)
                 stream.accept_waveform(sample_rate, samples)
                 while recognizer.is_ready(stream):
                     recognizer.decode_stream(stream)
-                current_result = recognizer.get_result(stream).strip()
-                if current_result and current_result != last_partial:
-                    last_partial = current_result
-                    self.signals.partial.emit(current_result)
-                result = current_result or last_partial
-                if boundary.observe(result, level, monotonic(), recognizer.is_endpoint(stream)):
-                    self.signals.final.emit(result)
+                result = recognizer.get_result(stream).strip()
+                if result and result != last_partial:
+                    last_partial = result
+                    self.signals.partial.emit(result)
+                if recognizer.is_endpoint(stream):
+                    if result:
+                        self.signals.final.emit(result)
                     recognizer.reset(stream)
                     last_partial = ""
-                    boundary.reset()
         except Exception as exc:
             if not self._stop.is_set():
                 self.signals.error.emit(f"本地语音识别失败：{exc}")

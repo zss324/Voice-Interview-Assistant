@@ -5,7 +5,7 @@
   #define ExePath "..\dist\VoiceInterviewAssistant.exe"
 #endif
 
-#define AppVersion "1.2.3"
+#define AppVersion "1.2.4"
 #define ModelName "sherpa-onnx-streaming-paraformer-bilingual-zh-en"
 
 [Setup]

@@ -1,7 +1,8 @@
 param(
     [string] $ModelDir = 'D:\Codex\models\interview-asr\sherpa-onnx-streaming-paraformer-bilingual-zh-en',
     [string] $CompilerPath = 'D:\Codex\tools\InnoSetup7\ISCC.exe',
-    [string] $ExePath = ''
+    [string] $ExePath = '',
+    [string] $ExpectedExeSha256 = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,12 @@ if (-not (Test-Path -LiteralPath $resolvedExePath)) {
     throw "找不到已构建的 EXE：$resolvedExePath"
 }
 $resolvedExePath = (Resolve-Path -LiteralPath $resolvedExePath).Path
+if ($ExpectedExeSha256) {
+    $actualExeSha256 = (Get-FileHash -LiteralPath $resolvedExePath -Algorithm SHA256).Hash
+    if ($actualExeSha256 -ne $ExpectedExeSha256) {
+        throw "EXE SHA-256 不匹配：$actualExeSha256"
+    }
+}
 if (-not (Test-Path -LiteralPath $CompilerPath)) {
     throw "找不到 Inno Setup 编译器：$CompilerPath"
 }
