@@ -17,7 +17,7 @@
 
 ## 普通用户：下载安装包
 
-1. 在本仓库的 **Releases（发行版）** 页面下载 `VoiceInterviewAssistant-Setup-1.2.0.exe`。请下载安装文件，而不是 GitHub 自动生成的 Source code ZIP；1.2.0 包含面试页透明度、临时隐藏和回答超时功能。
+1. 在本仓库的 **Releases（发行版）** 页面下载 `VoiceInterviewAssistant-Setup-1.2.1.exe`。请下载安装文件，而不是 GitHub 自动生成的 Source code ZIP；1.2.1 包含面试页透明度、临时隐藏、回答超时功能，并修复了部分 Windows 电脑上启动窗口失败的问题。
 2. 双击安装文件，按向导安装；安装后从桌面或开始菜单打开“语音面试助手”。安装程序将本机语音识别模型和程序一起放入安装目录。建议预留至少 700 MB 可用空间。
 3. 按下一节注册硅基流动、获取 API Key。首次启动时把 Key 粘贴到准备页，此后程序会在当前 Windows 用户下加密保存。
 4. 按“使用方法”配置麦克风和会议声音。语音转写在本机完成；生成回答仍需要网络连接。
@@ -110,7 +110,7 @@ py -3.12 -m venv 'D:\Codex\Voice-Interview-Assistant\.venv'
 
 ### 构建包含模型的安装包
 
-在完成上面的 EXE 构建并准备好模型后，安装 [Inno Setup](https://jrsoftware.org/isdl.php)，运行 `packaging\build-installer.ps1`。脚本默认使用 `D:\Codex\tools\InnoSetup7\ISCC.exe` 和 `D:\Codex\models\interview-asr\sherpa-onnx-streaming-paraformer-bilingual-zh-en`；位置不同可以用 `-CompilerPath`、`-ModelDir` 指定。当前源码构建产物位于 `dist-installer\VoiceInterviewAssistant-Setup-1.2.0.exe`。脚本只会打包这三个模型文件，不收录 `profile.json` 和 `api_key.dat`。
+在完成上面的 EXE 构建并准备好模型后，安装 [Inno Setup](https://jrsoftware.org/isdl.php)，运行 `packaging\build-installer.ps1`。脚本默认使用 `D:\Codex\tools\InnoSetup7\ISCC.exe` 和 `D:\Codex\models\interview-asr\sherpa-onnx-streaming-paraformer-bilingual-zh-en`；位置不同可以用 `-CompilerPath`、`-ModelDir` 指定。当前源码构建产物位于 `dist-installer\VoiceInterviewAssistant-Setup-1.2.1.exe`。脚本只会打包这三个模型文件，不收录 `profile.json` 和 `api_key.dat`。
 
 发布到 GitHub 时，请把安装包作为 Release asset 上传，并提供其 SHA-256 校验值。GitHub 自动生成的源码 ZIP 不含程序和模型。模型来源及许可信息见 [第三方组件说明](THIRD_PARTY_NOTICES.md)。
 

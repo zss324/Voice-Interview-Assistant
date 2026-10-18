@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 import win32crypt
+import pywintypes
 
 BASE_URL = "https://api.siliconflow.cn/v1"
 MODEL = "deepseek-ai/DeepSeek-V4-Flash"
@@ -70,7 +71,7 @@ class Config:
             try:
                 encrypted = self.key_path.read_bytes()
                 return win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)[1].decode("utf-8")
-            except (OSError, ValueError, UnicodeError):
+            except (OSError, ValueError, UnicodeError, pywintypes.error):
                 return ""
         return os.environ.get("INTERVIEW_API_KEY", "").strip()
 

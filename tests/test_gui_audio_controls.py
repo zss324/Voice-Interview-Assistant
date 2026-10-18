@@ -1,3 +1,6 @@
+import ctypes
+from ctypes import wintypes
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
@@ -49,3 +52,27 @@ def test_session_opacity_and_temporary_hide_restore(tmp_path, monkeypatch):
 
     window._hotkey_registered = False
     window.close()
+
+
+def test_native_event_ignores_other_messages_without_calling_qt_parent():
+    assert gui.MainWindow.nativeEvent(object(), b"windows_dispatcher_MSG", 0) == (False, 0)
+    assert gui.MainWindow.nativeEvent(object(), b"windows_generic_MSG", 0) == (False, 0)
+
+
+def test_native_event_restores_hidden_window_on_hotkey():
+    class WindowStub:
+        restored = False
+
+        def isHidden(self):
+            return True
+
+        def _restore_window(self):
+            self.restored = True
+
+    message = wintypes.MSG()
+    message.message = 0x0312
+    message.wParam = 0x564941
+    window = WindowStub()
+
+    assert gui.MainWindow.nativeEvent(window, b"windows_generic_MSG", ctypes.addressof(message)) == (True, 0)
+    assert window.restored

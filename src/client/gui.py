@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
             self._hotkey_registered = False
 
     def nativeEvent(self, event_type, message):
-        if sys.platform == "win32":
+        if sys.platform == "win32" and event_type == b"windows_generic_MSG" and int(message):
             from ctypes import wintypes
 
             event = wintypes.MSG.from_address(int(message))
@@ -300,7 +300,7 @@ class MainWindow(QMainWindow):
                 elif self.stack.currentIndex() == 1:
                     self._temporarily_hide()
                 return True, 0
-        return super().nativeEvent(event_type, message)
+        return False, 0
 
     def _temporarily_hide(self) -> None:
         tray_available = QSystemTrayIcon.isSystemTrayAvailable()
