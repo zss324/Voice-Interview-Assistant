@@ -46,6 +46,13 @@ def test_utterance_finishes_after_quiet_stable_text_and_resets():
     assert not boundary.observe("你的项目是什么", 45, 2.0, False)
 
 
+def test_utterance_finishes_after_silence_even_if_partial_text_keeps_changing():
+    boundary = UtteranceBoundary()
+    assert not boundary.observe("请介绍", 70, 0.0, False)
+    assert not boundary.observe("请介绍一下", 0, 0.8, False)
+    assert boundary.observe("请介绍一下自己", 0, 1.5, False)
+
+
 def test_utterance_finishes_when_model_endpoint_or_noisy_text_stabilizes():
     boundary = UtteranceBoundary()
     assert boundary.observe("Java 基础数据类型有哪些", 40, 0.0, True)
@@ -53,6 +60,22 @@ def test_utterance_finishes_when_model_endpoint_or_noisy_text_stabilizes():
     assert not boundary.observe("为什么这样设计", 50, 1.0, False)
     assert not boundary.observe("为什么这样设计", 50, 3.9, False)
     assert boundary.observe("为什么这样设计", 50, 4.1, False)
+
+
+def test_small_recognition_corrections_do_not_extend_noisy_wait_forever():
+    boundary = UtteranceBoundary()
+    assert not boundary.observe("你的项目是什么", 50, 0.0, False)
+    assert not boundary.observe("你的项目是什么?", 50, 1.0, False)
+    assert not boundary.observe("你的项目是什么？", 50, 2.0, False)
+    assert boundary.observe("你的项目是什么？", 50, 3.1, False)
+
+
+def test_continuously_changing_recognition_has_a_maximum_segment_length():
+    boundary = UtteranceBoundary()
+    assert not boundary.observe("请介绍", 50, 0.0, False)
+    assert not boundary.observe("请介绍你的经历", 50, 4.0, False)
+    assert not boundary.observe("请介绍你的经历和项目", 50, 8.0, False)
+    assert boundary.observe("请介绍你的经历和项目经验", 50, 12.1, False)
 
 
 def test_recognizer_emits_separate_questions_without_model_endpoints(tmp_path, monkeypatch):
@@ -98,3 +121,35 @@ def test_recognizer_emits_separate_questions_without_model_endpoints(tmp_path, m
     assert not errors, errors
     assert finals == ["请介绍一下自己", "你的项目是什么"]
     assert fake.resets == 2
+
+
+def test_recognizer_keeps_last_nonempty_text_when_model_temporarily_returns_blank(tmp_path, monkeypatch):
+    class FakeRecognizer:
+        def create_stream(self):
+            return SimpleNamespace(accept_waveform=lambda *args: None)
+
+        def is_ready(self, stream):
+            return False
+
+        def get_result(self, stream):
+            return ("请介绍一下自己", "", "")[calls.pop(0)]
+
+        def is_endpoint(self, stream):
+            return False
+
+        def reset(self, stream):
+            pass
+
+    calls = [0, 1, 2]
+    fake = FakeRecognizer()
+    monkeypatch.setattr(local_speech.sherpa_onnx, "OnlineRecognizer", SimpleNamespace(from_paraformer=lambda **kwargs: fake))
+    moments = iter((0.0, 0.8, 1.5))
+    monkeypatch.setattr(local_speech, "monotonic", lambda: next(moments))
+    recognizer = local_speech.LocalSpeechRecognizer(local_speech.SpeechSignals())
+    recognizer._single_chunks = lambda source: (
+        (16000, samples) for samples in (np.full(1600, 0.05, dtype=np.float32), np.zeros(1600, dtype=np.float32), np.zeros(1600, dtype=np.float32))
+    )
+    finals = []
+    recognizer.signals.final.connect(finals.append)
+    recognizer._run(AudioSource("loopback", 1, "扬声器", 16000, 1), tmp_path)
+    assert finals == ["请介绍一下自己"]

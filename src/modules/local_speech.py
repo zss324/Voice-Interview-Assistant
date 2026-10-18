@@ -153,23 +153,32 @@ class UtteranceBoundary:
     """Detect a completed utterance when the model does not report an endpoint."""
 
     QUIET_LEVEL = 18
-    QUIET_SECONDS = 0.9
-    STABLE_SECONDS = 1.4
+    QUIET_SECONDS = 1.4
+    MIN_TEXT_AGE = 0.8
     NOISY_STABLE_SECONDS = 3.0
+    MAX_UTTERANCE_SECONDS = 12.0
 
     def __init__(self) -> None:
         self.reset()
 
     def reset(self) -> None:
         self.last_text = ""
+        self.last_significant_text = ""
         self.last_change_at: float | None = None
         self.last_loud_at: float | None = None
+        self.first_text_at: float | None = None
+        self.peak_level = 0
 
     def observe(self, text: str, level: int, now: float, endpoint: bool) -> bool:
         if text != self.last_text:
+            if not self.last_significant_text or self._significant_change(self.last_significant_text, text):
+                self.last_significant_text = text
+                self.last_change_at = now
             self.last_text = text
-            self.last_change_at = now
-        if level >= self.QUIET_LEVEL:
+        if text and self.first_text_at is None:
+            self.first_text_at = now
+        self.peak_level = max(self.peak_level, level)
+        if level > max(self.QUIET_LEVEL, self.peak_level * 0.35):
             self.last_loud_at = now
         if not text:
             return False
@@ -179,9 +188,21 @@ class UtteranceBoundary:
             return False
         stable_for = now - self.last_change_at
         quiet_for = float("inf") if self.last_loud_at is None else now - self.last_loud_at
-        return (stable_for >= self.STABLE_SECONDS and quiet_for >= self.QUIET_SECONDS) or (
-            stable_for >= self.NOISY_STABLE_SECONDS
-        )
+        text_age = now - self.first_text_at if self.first_text_at is not None else 0.0
+        return (
+            quiet_for >= self.QUIET_SECONDS and text_age >= self.MIN_TEXT_AGE
+        ) or stable_for >= self.NOISY_STABLE_SECONDS or text_age >= self.MAX_UTTERANCE_SECONDS
+
+    @staticmethod
+    def _significant_change(previous: str, current: str) -> bool:
+        if abs(len(current) - len(previous)) >= 2:
+            return True
+        common = 0
+        for left, right in zip(previous, current):
+            if left != right:
+                break
+            common += 1
+        return common < min(len(previous), len(current)) - 2
 
 
 class LocalSpeechRecognizer:
@@ -334,13 +355,13 @@ class LocalSpeechRecognizer:
                 stream.accept_waveform(sample_rate, samples)
                 while recognizer.is_ready(stream):
                     recognizer.decode_stream(stream)
-                result = recognizer.get_result(stream).strip()
-                if result and result != last_partial:
-                    last_partial = result
-                    self.signals.partial.emit(result)
+                current_result = recognizer.get_result(stream).strip()
+                if current_result and current_result != last_partial:
+                    last_partial = current_result
+                    self.signals.partial.emit(current_result)
+                result = current_result or last_partial
                 if boundary.observe(result, level, monotonic(), recognizer.is_endpoint(stream)):
-                    if result:
-                        self.signals.final.emit(result)
+                    self.signals.final.emit(result)
                     recognizer.reset(stream)
                     last_partial = ""
                     boundary.reset()
