@@ -1,8 +1,11 @@
 #ifndef ModelDir
   #error ModelDir must be supplied by build-installer.ps1
 #endif
+#ifndef ExePath
+  #define ExePath "..\dist\VoiceInterviewAssistant.exe"
+#endif
 
-#define AppVersion "1.2.1"
+#define AppVersion "1.2.2"
 #define ModelName "sherpa-onnx-streaming-paraformer-bilingual-zh-en"
 
 [Setup]
@@ -26,7 +29,7 @@ LicenseFile=..\LICENSE
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
-Source: "..\dist\VoiceInterviewAssistant.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#ExePath}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion

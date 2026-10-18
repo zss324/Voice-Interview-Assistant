@@ -1,6 +1,7 @@
 param(
     [string] $ModelDir = 'D:\Codex\models\interview-asr\sherpa-onnx-streaming-paraformer-bilingual-zh-en',
-    [string] $CompilerPath = 'D:\Codex\tools\InnoSetup7\ISCC.exe'
+    [string] $CompilerPath = 'D:\Codex\tools\InnoSetup7\ISCC.exe',
+    [string] $ExePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,9 +12,11 @@ foreach ($file in @('tokens.txt', 'encoder.int8.onnx', 'decoder.int8.onnx')) {
         throw "模型缺少文件：$file"
     }
 }
-if (-not (Test-Path -LiteralPath (Join-Path $projectRoot 'dist\VoiceInterviewAssistant.exe'))) {
-    throw '请先用 PyInstaller 构建 dist\VoiceInterviewAssistant.exe'
+$resolvedExePath = if ($ExePath) { $ExePath } else { Join-Path $projectRoot 'dist\VoiceInterviewAssistant.exe' }
+if (-not (Test-Path -LiteralPath $resolvedExePath)) {
+    throw "找不到已构建的 EXE：$resolvedExePath"
 }
+$resolvedExePath = (Resolve-Path -LiteralPath $resolvedExePath).Path
 if (-not (Test-Path -LiteralPath $CompilerPath)) {
     throw "找不到 Inno Setup 编译器：$CompilerPath"
 }
@@ -23,7 +26,7 @@ $env:TMP = $env:TEMP
 New-Item -ItemType Directory -Force -Path $env:TEMP, (Join-Path $projectRoot 'dist-installer') | Out-Null
 Push-Location $PSScriptRoot
 try {
-    & $CompilerPath "/DModelDir=$modelPath" 'VoiceInterviewAssistant.iss'
+    & $CompilerPath "/DModelDir=$modelPath" "/DExePath=$resolvedExePath" 'VoiceInterviewAssistant.iss'
     if ($LASTEXITCODE -ne 0) { throw "安装包编译失败，退出码 $LASTEXITCODE" }
 }
 finally {

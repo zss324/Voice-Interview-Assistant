@@ -448,6 +448,7 @@ class MainWindow(QMainWindow):
         question = self.question_text.toPlainText().strip()
         if question:
             self.last_question = question
+            self.speech.discard_current_utterance()
             if self.answer_enabled:
                 self.service.answer(question, self.config.profile)
             else:

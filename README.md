@@ -7,7 +7,7 @@
 ## 功能与运行条件
 
 - 声音来源可选**会议声音**（所选扬声器或耳机的播放声音）、**麦克风**、**会议声音 + 麦克风**。
-- 使用 sherpa-onnx 的中英双语流式模型在本机转写；文字问题显示在窗口中。识别到问题后自动生成回答，也可手动点击“回答当前识别文字”。
+- 使用 sherpa-onnx 的中英双语流式模型在本机转写；文字问题显示在窗口中。识别到问题后自动生成回答，也可手动点击“回答当前识别文字”。如果模型没有给出句尾信号，程序会在识别文字稳定后自动结束当前问题；手动回答后也会重置识别流，让下一个问题单独显示。
 - 准备页可填写岗位名称、公司、岗位描述，导入带文字层的 PDF 简历并修改提取结果。与提问相关时才使用这些资料；普通知识题不主动带入个人背景。
 - 岗位和简历文字保存在程序旁的 `profile.json`；API Key 通过 Windows 当前用户加密后保存在 `api_key.dat`，下次启动自动读取。“清除资料”会清除这两份本机数据，但不删除原 PDF。
 - 准备页和面试页均可调整窗口透明度；面试页可临时隐藏窗口，通过 `Ctrl+Alt+H` 或系统托盘图标恢复。勾选“开始后隐藏任务栏图标”时，面试页不显示任务栏图标，返回准备页后恢复。在腾讯会议共享屏幕时，工具窗口不会显示在共享画面中；实体摄像头仍可能拍到显示器。
@@ -17,7 +17,7 @@
 
 ## 普通用户：下载安装包
 
-1. 在本仓库的 **Releases（发行版）** 页面下载 `VoiceInterviewAssistant-Setup-1.2.1.exe`。请下载安装文件，而不是 GitHub 自动生成的 Source code ZIP；1.2.1 包含面试页透明度、临时隐藏、回答超时功能，并修复了部分 Windows 电脑上启动窗口失败的问题。
+1. 在本仓库的 **Releases（发行版）** 页面下载 `VoiceInterviewAssistant-Setup-1.2.2.exe`。请下载安装文件，而不是 GitHub 自动生成的 Source code ZIP；1.2.2 包含面试页透明度、临时隐藏、回答超时功能，并修复了启动窗口失败、部分声音设备上无法自动回答及问题文字连续累积的问题。
 2. 双击安装文件，按向导安装；安装后从桌面或开始菜单打开“语音面试助手”。安装程序将本机语音识别模型和程序一起放入安装目录。建议预留至少 700 MB 可用空间。
 3. 按下一节注册硅基流动、获取 API Key。首次启动时把 Key 粘贴到准备页，此后程序会在当前 Windows 用户下加密保存。
 4. 按“使用方法”配置麦克风和会议声音。语音转写在本机完成；生成回答仍需要网络连接。
@@ -110,7 +110,7 @@ py -3.12 -m venv 'D:\Codex\Voice-Interview-Assistant\.venv'
 
 ### 构建包含模型的安装包
 
-在完成上面的 EXE 构建并准备好模型后，安装 [Inno Setup](https://jrsoftware.org/isdl.php)，运行 `packaging\build-installer.ps1`。脚本默认使用 `D:\Codex\tools\InnoSetup7\ISCC.exe` 和 `D:\Codex\models\interview-asr\sherpa-onnx-streaming-paraformer-bilingual-zh-en`；位置不同可以用 `-CompilerPath`、`-ModelDir` 指定。当前源码构建产物位于 `dist-installer\VoiceInterviewAssistant-Setup-1.2.1.exe`。脚本只会打包这三个模型文件，不收录 `profile.json` 和 `api_key.dat`。
+在完成上面的 EXE 构建并准备好模型后，安装 [Inno Setup](https://jrsoftware.org/isdl.php)，运行 `packaging\build-installer.ps1`。脚本默认使用 `D:\Codex\tools\InnoSetup7\ISCC.exe` 和 `D:\Codex\models\interview-asr\sherpa-onnx-streaming-paraformer-bilingual-zh-en`；位置不同可以用 `-CompilerPath`、`-ModelDir` 指定。当前源码构建产物位于 `dist-installer\VoiceInterviewAssistant-Setup-1.2.2.exe`。脚本只会打包这三个模型文件，不收录 `profile.json` 和 `api_key.dat`。
 
 发布到 GitHub 时，请把安装包作为 Release asset 上传，并提供其 SHA-256 校验值。GitHub 自动生成的源码 ZIP 不含程序和模型。模型来源及许可信息见 [第三方组件说明](THIRD_PARTY_NOTICES.md)。
 
